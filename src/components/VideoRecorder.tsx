@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
+/* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
@@ -8,6 +10,18 @@ import { useState, useRef, useEffect } from "react";
 interface VideoRecorderProps {
 	userData: UserData | null;
 }
+
+// Fungsi untuk mendapatkan mimeType yang didukung oleh browser
+const getSupportedMimeType = () => {
+	const mimeTypes = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm;codecs=h264,opus", "video/webm", "video/mp4"];
+
+	for (const mimeType of mimeTypes) {
+		if (MediaRecorder.isTypeSupported(mimeType)) {
+			return mimeType;
+		}
+	}
+	return undefined;
+};
 
 export default function VideoRecorder({ userData }: VideoRecorderProps) {
 	const videoRef = useRef<HTMLVideoElement>(null);
@@ -29,16 +43,27 @@ export default function VideoRecorder({ userData }: VideoRecorderProps) {
 				if (videoRef.current) {
 					videoRef.current.srcObject = stream;
 
-					// Buat media recorder
-					const recorder = new MediaRecorder(stream, {
-						mimeType: "video/webm;codecs=vp9,opus",
-					});
+					// Dapatkan mimeType yang didukung
+					const mimeType = getSupportedMimeType();
+					const options = mimeType ? { mimeType } : undefined;
+
+					// Coba buat MediaRecorder dengan format yang didukung
+					let recorder: MediaRecorder;
+					let recordedMimeType = mimeType || "video/webm";
+
+					try {
+						recorder = new MediaRecorder(stream, options);
+					} catch (err) {
+						// Fallback jika gagal dengan options
+						recorder = new MediaRecorder(stream);
+						recordedMimeType = "video/webm";
+					}
 
 					let chunks: BlobPart[] = [];
 					recorder.ondataavailable = (e) => chunks.push(e.data);
 
 					recorder.onstop = async () => {
-						const blob = new Blob(chunks, { type: "video/webm" });
+						const blob = new Blob(chunks, { type: recordedMimeType });
 						const url = URL.createObjectURL(blob);
 						setVideoUrl(url);
 						chunks = [];
@@ -46,25 +71,23 @@ export default function VideoRecorder({ userData }: VideoRecorderProps) {
 						try {
 							setUploading(true);
 
-							// Buat nama file unik
-							const fileName = `video-${Date.now()}-${Math.random().toString(36).substring(2, 11)}.webm`;
+							// Tentukan ekstensi file berdasarkan mimeType
+							const extension = recordedMimeType.includes("mp4") ? "mp4" : "webm";
 
-							// Upload video ke Supabase Storage
+							const fileName = `video-${Date.now()}-${Math.random().toString(36).substring(2, 11)}.${extension}`;
+
+							// Upload ke Supabase
 							const { data: uploadData, error: uploadError } = await supabase.storage.from("videos").upload(fileName, blob);
 
-							if (uploadError) {
-								throw uploadError;
-							}
+							if (uploadError) throw uploadError;
 
 							// Dapatkan URL publik
 							const { data: publicUrlData } = supabase.storage.from("videos").getPublicUrl(uploadData.path);
 
-							const publicUrl = publicUrlData.publicUrl;
-
-							// Simpan metadata video
+							// Simpan metadata
 							await supabase.from("user_videos").insert([
 								{
-									video_url: publicUrl,
+									video_url: publicUrlData.publicUrl,
 									recorded_at: new Date().toISOString(),
 									user_data: userData,
 								},
@@ -88,7 +111,6 @@ export default function VideoRecorder({ userData }: VideoRecorderProps) {
 
 		return () => {
 			if (videoRef.current?.srcObject) {
-				// eslint-disable-next-line react-hooks/exhaustive-deps
 				const tracks = (videoRef.current.srcObject as MediaStream).getTracks();
 				tracks.forEach((track) => track.stop());
 			}
