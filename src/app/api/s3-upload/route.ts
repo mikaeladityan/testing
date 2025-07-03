@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from "next/server";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
@@ -6,13 +7,18 @@ export async function POST(request: NextRequest) {
 	try {
 		const { fileName, fileType } = await request.json();
 
+		// Validasi input
+		if (!fileName || !fileType) {
+			return NextResponse.json({ error: "fileName and fileType are required" }, { status: 400 });
+		}
+
 		// Konfigurasi S3 client untuk ID Cloudhost
 		const s3Client = new S3Client({
 			region: process.env.S3_REGION,
 			endpoint: process.env.S3_ENDPOINT,
 			credentials: {
-				accessKeyId: process.env.S3_ACCESS_KEY!,
-				secretAccessKey: process.env.S3_SECRET_KEY!,
+				accessKeyId: process.env.S3_ACCESS_KEY || "",
+				secretAccessKey: process.env.S3_SECRET_KEY || "",
 			},
 			forcePathStyle: true, // Diperlukan untuk S3 selain AWS
 		});
@@ -31,8 +37,8 @@ export async function POST(request: NextRequest) {
 		const publicUrl = `${process.env.S3_ENDPOINT}/${process.env.S3_BUCKET_NAME}/${fileName}`;
 
 		return NextResponse.json({ url, publicUrl });
-	} catch (error) {
+	} catch (error: any) {
 		console.error("S3 Upload Error:", error);
-		return NextResponse.json({ error: "Gagal membuat URL unggah" }, { status: 500 });
+		return NextResponse.json({ error: error.message || "Gagal membuat URL unggah" }, { status: 500 });
 	}
 }
