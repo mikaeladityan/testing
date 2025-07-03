@@ -1,17 +1,13 @@
-export interface GeolocationData {
+// Data lokasi
+export interface LocationData {
 	lat: number;
 	lng: number;
 	accuracy: number;
-	timestamp?: number;
 }
 
+// Data kontak
 export interface ContactData {
 	name: string;
 	email: string;
 	phone: string;
-}
-
-export interface UserData {
-	location: GeolocationData;
-	contacts: ContactData[];
 }
