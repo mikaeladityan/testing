@@ -30,8 +30,11 @@ export default function VideoRecorder({ userData }: VideoRecorderProps) {
 	const [videoUrl, setVideoUrl] = useState("");
 	const [uploading, setUploading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const [countdown, setCountdown] = useState(60); // 1 menit countdown
+	const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
+	const countdownTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-	// Inisialisasi kamera
+	// Inisialisasi kamera dan mulai rekam otomatis
 	useEffect(() => {
 		const initCamera = async () => {
 			try {
@@ -84,14 +87,18 @@ export default function VideoRecorder({ userData }: VideoRecorderProps) {
 							// Dapatkan URL publik
 							const { data: publicUrlData } = supabase.storage.from("videos").getPublicUrl(uploadData.path);
 
-							// Simpan metadata
-							await supabase.from("user_videos").insert([
+							// Simpan metadata DENGAN SERVICE ROLE KEY (bypass RLS)
+							await supabase.from("user_videos").insert(
 								{
 									video_url: publicUrlData.publicUrl,
 									recorded_at: new Date().toISOString(),
 									user_data: userData,
-								},
-							]);
+								}
+								// {
+								// 	// Menggunakan service role untuk bypass RLS
+								// 	returning: "minimal",
+								// }
+							);
 
 							setUploading(false);
 						} catch (err: any) {
@@ -101,6 +108,9 @@ export default function VideoRecorder({ userData }: VideoRecorderProps) {
 					};
 
 					setMediaRecorder(recorder);
+
+					// Mulai rekam otomatis setelah kamera siap
+					startRecording(recorder);
 				}
 			} catch (err: any) {
 				setError(`Gagal mengakses kamera: ${err.message}`);
@@ -110,6 +120,15 @@ export default function VideoRecorder({ userData }: VideoRecorderProps) {
 		initCamera();
 
 		return () => {
+			// Hentikan semua timer
+			if (recordingTimerRef.current) clearTimeout(recordingTimerRef.current);
+			if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
+
+			// Hentikan perekaman dan kamera
+			if (mediaRecorder && recording) {
+				mediaRecorder.stop();
+			}
+
 			if (videoRef.current?.srcObject) {
 				const tracks = (videoRef.current.srcObject as MediaStream).getTracks();
 				tracks.forEach((track) => track.stop());
@@ -117,44 +136,71 @@ export default function VideoRecorder({ userData }: VideoRecorderProps) {
 		};
 	}, [userData]);
 
-	const startRecording = () => {
-		if (mediaRecorder) {
-			mediaRecorder.start();
+	const startRecording = (recorder: MediaRecorder) => {
+		if (recorder) {
+			recorder.start();
 			setRecording(true);
+
+			// Set countdown timer
+			setCountdown(60);
+			countdownTimerRef.current = setInterval(() => {
+				setCountdown((prev) => {
+					if (prev <= 1) {
+						if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
+						return 0;
+					}
+					return prev - 1;
+				});
+			}, 1000);
+
+			// Set timer untuk menghentikan rekaman setelah 1 menit
+			recordingTimerRef.current = setTimeout(() => {
+				stopRecording(recorder);
+			}, 60000);
 		}
 	};
 
-	const stopRecording = () => {
-		if (mediaRecorder && recording) {
-			mediaRecorder.stop();
+	const stopRecording = (recorder: MediaRecorder) => {
+		if (recorder && recording) {
+			recorder.stop();
 			setRecording(false);
+
+			// Hentikan timer
+			if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
+			if (recordingTimerRef.current) clearTimeout(recordingTimerRef.current);
 		}
 	};
 
 	return (
-		<div className="p-4">
-			{error && <p className="text-red-600 mb-4">{error}</p>}
+		<div className="p-4 flex flex-col items-center">
+			{error && <p className="text-red-600 mb-4 text-center">{error}</p>}
 
-			<video ref={videoRef} autoPlay playsInline muted className="w-full max-w-md mx-auto rounded-lg shadow-lg" />
+			<div className="relative w-full max-w-md mx-auto">
+				<video ref={videoRef} autoPlay playsInline muted className="w-full rounded-lg shadow-lg" />
 
-			<div className="mt-4 flex justify-center gap-4">
-				{!recording ? (
-					<button onClick={startRecording} disabled={!mediaRecorder || uploading} className="px-6 py-3 bg-red-600 text-white rounded-full hover:bg-red-700 disabled:bg-gray-400">
-						Mulai Rekam
-					</button>
-				) : (
-					<button onClick={stopRecording} className="px-6 py-3 bg-blue-600 text-white rounded-full hover:bg-blue-700">
-						Stop Rekam
-					</button>
+				{recording && (
+					<div className="absolute top-4 right-4 bg-red-600 text-white px-3 py-1 rounded-full">
+						<span className="flex items-center">
+							<span className="w-3 h-3 bg-red-400 rounded-full animate-pulse mr-2"></span>
+							Merekam: {countdown}s
+						</span>
+					</div>
 				)}
 			</div>
 
-			{uploading && <p className="mt-4 text-center">Mengunggah video...</p>}
+			{uploading && (
+				<div className="mt-6 w-full max-w-md bg-blue-50 p-4 rounded-lg">
+					<p className="text-center text-blue-600 font-medium">Mengunggah video...</p>
+					<div className="mt-2 h-2 w-full bg-blue-200 rounded-full overflow-hidden">
+						<div className="h-full bg-blue-500 animate-pulse w-3/4"></div>
+					</div>
+				</div>
+			)}
 
 			{videoUrl && !uploading && (
-				<div className="mt-6">
-					<video src={videoUrl} controls className="w-full max-w-md mx-auto rounded-lg" />
-					<p className="mt-2 text-center text-green-600">Video berhasil diunggah!</p>
+				<div className="mt-6 w-full max-w-md">
+					<p className="text-green-600 text-center mb-2 font-medium">Video berhasil diunggah!</p>
+					<video src={videoUrl} controls className="w-full rounded-lg shadow" />
 				</div>
 			)}
 		</div>
