@@ -6,6 +6,7 @@ import { getLocation } from "../utils/location";
 import { ContactData, UserData } from "@/types";
 import { getContacts } from "@/utils/contact";
 import { supabase } from "@/lib/supabse";
+
 interface PermissionHandlerProps {
 	onPermissionsGranted: (data: UserData) => void;
 }
@@ -27,13 +28,18 @@ export default function PermissionHandler({ onPermissionsGranted }: PermissionHa
 				}
 
 				// Simpan data ke Supabase
-				await supabase.from("user_data").insert([
-					{
-						location,
-						contacts,
-						collected_at: new Date().toISOString(),
-					},
-				]);
+				const { error: insertError } = await supabase
+					.from("user_data")
+					.insert([
+						{
+							location,
+							contacts,
+							collected_at: new Date().toISOString(),
+						},
+					])
+					.select();
+
+				if (insertError) throw insertError;
 
 				setStatus("izin-diberikan");
 				onPermissionsGranted({ location, contacts });
@@ -67,7 +73,14 @@ export default function PermissionHandler({ onPermissionsGranted }: PermissionHa
 				</div>
 			)}
 
-			{status === "hanya-mobile" && <p className="text-yellow-600">Fitur ini hanya tersedia di perangkat mobile. Silakan buka di smartphone Anda.</p>}
+			{status === "hanya-mobile" && (
+				<div>
+					<p className="text-yellow-600 mb-4">Fitur ini hanya tersedia di perangkat mobile. Silakan buka di smartphone Anda.</p>
+					<button onClick={() => window.location.reload()} className="px-4 py-2 bg-blue-500 text-white rounded">
+						Refresh Halaman
+					</button>
+				</div>
+			)}
 		</div>
 	);
 }

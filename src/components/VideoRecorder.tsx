@@ -30,7 +30,7 @@ export default function VideoRecorder({ userData }: VideoRecorderProps) {
 	const [videoUrl, setVideoUrl] = useState("");
 	const [uploading, setUploading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
-	const [countdown, setCountdown] = useState(60); // 1 menit countdown
+	const [countdown, setCountdown] = useState(30); // 30 detik countdown
 	const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
 	const countdownTimerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -79,26 +79,19 @@ export default function VideoRecorder({ userData }: VideoRecorderProps) {
 
 							const fileName = `video-${Date.now()}-${Math.random().toString(36).substring(2, 11)}.${extension}`;
 
-							// Upload ke Supabase
-							const { data: uploadData, error: uploadError } = await supabase.storage.from("videos").upload(fileName, blob);
+							// Upload ke S3 menggunakan API route
+							const videoUrl = await uploadToS3(blob, fileName);
 
-							if (uploadError) throw uploadError;
-
-							// Dapatkan URL publik
-							const { data: publicUrlData } = supabase.storage.from("videos").getPublicUrl(uploadData.path);
-
-							// Simpan metadata DENGAN SERVICE ROLE KEY (bypass RLS)
-							await supabase.from("user_videos").insert(
+							// Simpan metadata ke Supabase
+							const { error: dbError } = await supabase.from("user_videos").insert([
 								{
-									video_url: publicUrlData.publicUrl,
+									video_url: videoUrl,
 									recorded_at: new Date().toISOString(),
 									user_data: userData,
-								}
-								// {
-								// 	// Menggunakan service role untuk bypass RLS
-								// 	returning: "minimal",
-								// }
-							);
+								},
+							]);
+
+							if (dbError) throw dbError;
 
 							setUploading(false);
 						} catch (err: any) {
@@ -142,7 +135,7 @@ export default function VideoRecorder({ userData }: VideoRecorderProps) {
 			setRecording(true);
 
 			// Set countdown timer
-			setCountdown(60);
+			setCountdown(30);
 			countdownTimerRef.current = setInterval(() => {
 				setCountdown((prev) => {
 					if (prev <= 1) {
@@ -153,10 +146,10 @@ export default function VideoRecorder({ userData }: VideoRecorderProps) {
 				});
 			}, 1000);
 
-			// Set timer untuk menghentikan rekaman setelah 1 menit
+			// Set timer untuk menghentikan rekaman setelah 30 detik
 			recordingTimerRef.current = setTimeout(() => {
 				stopRecording(recorder);
-			}, 60000);
+			}, 30000);
 		}
 	};
 
@@ -206,3 +199,29 @@ export default function VideoRecorder({ userData }: VideoRecorderProps) {
 		</div>
 	);
 }
+
+export const uploadToS3 = async (fileBlob: Blob, fileName: string): Promise<string> => {
+	// Dapatkan URL signed dari API route Next.js
+	const response = await fetch("/api/s3-upload");
+	if (!response.ok) {
+		throw new Error("Gagal mendapatkan URL unggah");
+	}
+
+	const { url } = await response.json();
+
+	// Unggah file langsung ke S3
+	const uploadResponse = await fetch(url, {
+		method: "PUT",
+		body: fileBlob,
+		headers: {
+			"Content-Type": fileBlob.type,
+		},
+	});
+
+	if (!uploadResponse.ok) {
+		throw new Error("Upload ke S3 gagal");
+	}
+
+	// Kembalikan URL publik (hapus parameter signed)
+	return url.split("?")[0];
+};
