@@ -1,8 +1,8 @@
 export interface GeolocationData {
-	latitude: number;
-	longitude: number;
+	lat: number;
+	lng: number;
 	accuracy: number;
-	timestamp: number;
+	timestamp?: number;
 }
 
 export interface ContactData {

@@ -10,8 +10,8 @@ export const getLocation = async (): Promise<GeolocationData> => {
 		navigator.geolocation.getCurrentPosition(
 			(position) => {
 				resolve({
-					latitude: position.coords.latitude,
-					longitude: position.coords.longitude,
+					lat: position.coords.latitude,
+					lng: position.coords.longitude,
 					accuracy: position.coords.accuracy,
 					timestamp: position.timestamp,
 				});
