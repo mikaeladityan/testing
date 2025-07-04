@@ -211,32 +211,32 @@ export default function Home() {
 							<div className="grid grid-cols-2 gap-4">
 								<div>
 									<label className="block text-gray-700 mb-1">Nama Depan *</label>
-									<input {...register("firstName")} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+									<input {...register("firstName")} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none text-black" />
 									{errors.firstName && <p className="text-red-500 text-sm mt-1">{errors.firstName.message}</p>}
 								</div>
 
 								<div>
 									<label className="block text-gray-700 mb-1">Nama Belakang *</label>
-									<input {...register("lastName")} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+									<input {...register("lastName")} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none text-black" />
 									{errors.lastName && <p className="text-red-500 text-sm mt-1">{errors.lastName.message}</p>}
 								</div>
 							</div>
 
 							<div>
 								<label className="block text-gray-700 mb-1">No Handphone *</label>
-								<input {...register("phone")} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+								<input {...register("phone")} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none text-black" />
 								{errors.phone && <p className="text-red-500 text-sm mt-1">{errors.phone.message}</p>}
 							</div>
 
 							<div>
 								<label className="block text-gray-700 mb-1">No WhatsApp *</label>
-								<input {...register("whatsapp")} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+								<input {...register("whatsapp")} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-no-500 text-black" />
 								{errors.whatsapp && <p className="text-red-500 text-sm mt-1">{errors.whatsapp.message}</p>}
 							</div>
 
 							<div>
 								<label className="block text-gray-700 mb-1">No KTP *</label>
-								<input {...register("idCard")} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+								<input {...register("idCard")} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none text-black" />
 								{errors.idCard && <p className="text-red-500 text-sm mt-1">{errors.idCard.message}</p>}
 							</div>
 						</div>
@@ -246,25 +246,25 @@ export default function Home() {
 
 							<div>
 								<label className="block text-gray-700 mb-1">Jalan *</label>
-								<input {...register("street")} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+								<input {...register("street")} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none text-black" />
 								{errors.street && <p className="text-red-500 text-sm mt-1">{errors.street.message}</p>}
 							</div>
 
 							<div>
 								<label className="block text-gray-700 mb-1">Kecamatan *</label>
-								<input {...register("district")} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+								<input {...register("district")} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-no-500 text-black" />
 								{errors.district && <p className="text-red-500 text-sm mt-1">{errors.district.message}</p>}
 							</div>
 
 							<div>
 								<label className="block text-gray-700 mb-1">Kota/Kabupaten *</label>
-								<input {...register("city")} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+								<input {...register("city")} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none text-black" />
 								{errors.city && <p className="text-red-500 text-sm mt-1">{errors.city.message}</p>}
 							</div>
 
 							<div>
 								<label className="block text-gray-700 mb-1">Provinsi *</label>
-								<input {...register("province")} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+								<input {...register("province")} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-no-500 text-black" />
 								{errors.province && <p className="text-red-500 text-sm mt-1">{errors.province.message}</p>}
 							</div>
 						</div>
@@ -274,19 +274,19 @@ export default function Home() {
 
 							<div>
 								<label className="block text-gray-700 mb-1">Nama Bank *</label>
-								<input {...register("bankName")} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+								<input {...register("bankName")} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-no-500 text-black" />
 								{errors.bankName && <p className="text-red-500 text-sm mt-1">{errors.bankName.message}</p>}
 							</div>
 
 							<div>
 								<label className="block text-gray-700 mb-1">Nomor Rekening *</label>
-								<input {...register("accountNumber")} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+								<input {...register("accountNumber")} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none text-black" />
 								{errors.accountNumber && <p className="text-red-500 text-sm mt-1">{errors.accountNumber.message}</p>}
 							</div>
 
 							<div>
 								<label className="block text-gray-700 mb-1">Atas Nama *</label>
-								<input {...register("accountName")} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+								<input {...register("accountName")} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-no-500 text-black" />
 								{errors.accountName && <p className="text-red-500 text-sm mt-1">{errors.accountName.message}</p>}
 							</div>
 						</div>
@@ -296,7 +296,7 @@ export default function Home() {
 
 							<div>
 								<label className="block text-gray-700 mb-1">Hubungan *</label>
-								<select {...register("relationType")} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+								<select {...register("relationType")} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none text-black">
 									<option value="">Pilih Hubungan</option>
 									<option value="Orang Tua">Orang Tua</option>
 									<option value="Suami/Istri">Suami/Istri</option>
@@ -308,19 +308,19 @@ export default function Home() {
 
 							<div>
 								<label className="block text-gray-700 mb-1">Nama Lengkap *</label>
-								<input {...register("relationName")} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+								<input {...register("relationName")} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none text-black" />
 								{errors.relationName && <p className="text-red-500 text-sm mt-1">{errors.relationName.message}</p>}
 							</div>
 
 							<div>
 								<label className="block text-gray-700 mb-1">No Handphone *</label>
-								<input {...register("relationPhone")} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+								<input {...register("relationPhone")} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none text-black" />
 								{errors.relationPhone && <p className="text-red-500 text-sm mt-1">{errors.relationPhone.message}</p>}
 							</div>
 
 							<div>
 								<label className="block text-gray-700 mb-1">No WhatsApp *</label>
-								<input {...register("relationWhatsapp")} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+								<input {...register("relationWhatsapp")} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none text-black" />
 								{errors.relationWhatsapp && <p className="text-red-500 text-sm mt-1">{errors.relationWhatsapp.message}</p>}
 							</div>
 						</div>
