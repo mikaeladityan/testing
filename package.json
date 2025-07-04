@@ -11,11 +11,14 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.842.0",
     "@aws-sdk/s3-request-presigner": "^3.842.0",
+    "@hookform/resolvers": "^5.1.1",
     "@supabase/auth-helpers-nextjs": "^0.10.0",
     "@supabase/supabase-js": "^2.50.3",
     "next": "15.3.4",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "react-hook-form": "^7.59.0",
+    "zod": "^3.25.71"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
